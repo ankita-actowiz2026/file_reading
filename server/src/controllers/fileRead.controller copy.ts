@@ -282,3 +282,52 @@ for await (const worksheet of workbook) {
    data: result
   });
 };
+
+export const readFile1233 = async (req: Request, res: Response) => {
+  const filePath = path.join(process.cwd(), "uploads", "data1.xlsx");
+
+  const workbook = new ExcelJS.Workbook();
+  
+  await workbook.xlsx.readFile(filePath);
+
+  const worksheet = workbook.worksheets[0];  //read first sheet
+
+  const allRows: any[] = [];
+  const columnCount: Record<string, number> = {};
+
+  let headers: string[] = [];
+
+  worksheet.eachRow((row, rowNumber) => {
+    const values: string[] = [];
+
+    row.eachCell({ includeEmpty: true }, (cell) => {
+      values.push(getCellValue(cell).trim());
+    });
+    //console.log(values)
+
+    if (values.every(v => v === "")) return;
+
+    if (rowNumber === 1) {
+      headers = values.map((h) => String(h).toLowerCase().trim().replace(/\s+/g, '_'));     
+    }
+    else{
+      const rowObject: any = {};
+
+      headers.forEach((header, index) => {        
+        const value = values[index] ?? "";      
+        rowObject[header] = value;
+
+        if (value !== "") {
+          columnCount[header] = (columnCount[header] |0 )+1;
+        }
+      });
+
+      allRows.push(rowObject);
+    }
+  });
+
+  res.json({
+    countColoms: columnCount,
+    data: allRows
+  });
+};
