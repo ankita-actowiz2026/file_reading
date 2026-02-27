@@ -331,3 +331,137 @@ export const readFile1233 = async (req: Request, res: Response) => {
     data: allRows
   });
 };
+
+export const readFile12311= async (req: Request, res: Response) => {
+
+
+  const filePath = path.join(process.cwd(), "uploads", "data123.json");
+  
+  const ext = path.extname(filePath).toLowerCase();
+  
+  let totalRows = 0;
+  const allRows: any[] = [];
+  const columnCount: Record<string, number> = {};
+  let headers: string[] = [];
+  let headerInitialized = false;
+  
+  if(ext==".xlsx")
+  {
+    const workbook = new ExcelJS.stream.xlsx.WorkbookReader(filePath, {
+      entries: "emit",
+      sharedStrings: "cache",
+      hyperlinks: "cache",
+      worksheets: "emit",
+    });   
+
+    for await (const worksheet of workbook) {
+      for await (const row of worksheet) {
+        const rowValues: string[] = [];
+
+        row.eachCell({ includeEmpty: true }, (cell, colNumber) => {
+          rowValues[colNumber - 1] = getCellValue(cell);
+        });
+
+        // Skip completely empty rows
+        if (!rowValues.some(v => v && v.trim() !== "")) continue;
+
+        // Initialize header (FIRST NON-EMPTY ROW ONLY)
+        if (!headerInitialized) {
+          headers = rowValues.map((h, index) =>h && h.trim() !== "" ? h.trim() : `Column_${index + 1}` );
+          headers.forEach(h => columnCount[h] = 0);
+          headerInitialized = true;
+        
+        }
+        else
+        {      
+          const rowObject: any = {};
+          // Process row (DO NOT STORE ALL if 100k+)
+          headers.forEach((header, index) => {
+            const value = rowValues[index] ?? "";
+            rowObject[header] = value;
+
+            if (value !== "") {
+              columnCount[header]++;
+            }
+          });
+          allRows.push(rowObject);
+          totalRows++;      
+        }
+      }
+      break; // Only first sheet
+    }
+  }
+  else  if(ext==".csv"){
+      await new Promise<void>((resolve, reject) => {
+
+    fs.createReadStream(filePath)
+      .pipe(csv({ headers: false })) // IMPORTANT: we handle header manually
+      .on("data", (row: any) => {
+
+        const rowValues: string[] = Object.values(row).map(v =>
+          v ? String(v).trim() : ""
+        );
+
+        // Skip completely empty rows
+        if (!rowValues.some(v => v !== "")) return;
+
+        // Initialize header (FIRST NON-EMPTY ROW ONLY)
+        if (!headerInitialized) {
+
+          headers = rowValues.map((h, index) =>
+            h !== "" ? h : `Column_${index + 1}`
+          );
+
+          headers.forEach(h => columnCount[h] = 0);
+
+          headerInitialized = true;
+          return;
+        }
+
+        // Process row
+        const rowObject: any = {};
+
+        headers.forEach((header, index) => {
+          const value = rowValues[index] ?? "";
+
+          rowObject[header] = value;
+
+          if (value !== "") {
+            columnCount[header]++;
+          }
+        });
+
+        allRows.push(rowObject);
+        totalRows++;
+      })
+      .on("end", () => resolve())
+      .on("error", reject);
+    })
+  }
+  else if(ext==".json")
+  {
+    await pipeline(
+        fs.createReadStream(filePath),
+        parser(),
+        streamArray(),
+        async function (
+          source: AsyncIterable<{ key: number; value: Record<string, unknown> }>
+        ): Promise<void> {
+          for await (const { value } of source) {
+            allRows.push(value);
+            totalRows++;
+
+            for (const key of Object.keys(value)) {
+              const new_key= String(key).toLowerCase().trim().replace(/\s+/g, '_');
+              columnCount[new_key] = (columnCount[new_key] ?? 0) + 1;
+            }
+          }
+        }
+      );
+  }
+  res.json({
+    totalRows,
+    columnCount,
+    allRows
+  });
+};
